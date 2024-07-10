@@ -299,6 +299,9 @@ class ControllerOptimalPredictive:
         self.action_sqn_init = []
         self.state_init = []
 
+        self.obstacle_pos = obstacle
+        self.initialize_obstacle_distribution(obstacle)
+
         if len(action_init) == 0:
             self.action_curr = self.action_min/10
             self.action_sqn_init = rep_mat( self.action_min/10 , 1, self.Nactor)
@@ -357,7 +360,6 @@ class ControllerOptimalPredictive:
             self.Wmax = np.ones(self.dim_critic) 
         self.N_CTRL = N_CTRL()
         self.S_CTRL = S_CTRL()
-        self.Turtlebot3_CTRL = Turtlebot3_CTRL()
 
     def reset(self,t0):
         """
@@ -398,7 +400,16 @@ class ControllerOptimalPredictive:
         
         """
         self.accum_obj_val += self.run_obj(observation, action)*self.sampling_time
-                 
+
+
+    def initialize_obstacle_distribution(self, obstacle):
+        self.obstacle_position = np.array([obstacle[:2]])
+        self.obstacle_sigma_x = obstacle[2]
+        self.obstacle_sigma_y = obstacle[2]
+
+    def gaussian(self, x, mu, sigma):
+        return np.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))     
+         
     def run_obj(self, observation, action):
         """
         Running (equivalently, instantaneous or stage) objective. Depending on the context, it is also called utility, reward, running cost etc.
@@ -410,9 +421,16 @@ class ControllerOptimalPredictive:
         ################################# write down here cost-function #####################################
         #####################################################################################################
 
-        factor = np.concatenate([observation, action])
-        factor_transpose = np.transpose(factor)
-        cost = np.dot(factor_transpose, np.dot(self.run_obj_pars[0], factor))
+        if self.run_obj_struct == "quadratic":
+            factor = np.concatenate([observation, action])
+            cost = np.dot(factor, np.dot(self.run_obj_pars[0], factor))
+
+        if self.obstacle_pos is not None:
+            obstacle_gain = 1000000000
+            obs_cost_x = self.gaussian(observation[0], self.obstacle_position[0][0], self.obstacle_sigma_x)
+            obs_cost_y = self.gaussian(observation[1], self.obstacle_position[0][1], self.obstacle_sigma_y)
+            obs_cost = obs_cost_x * obs_cost_y
+            cost += obstacle_gain * obs_cost
 
         return cost
 
@@ -552,9 +570,6 @@ class ControllerOptimalPredictive:
             elif self.mode == "S_CTRL":
                 action = self.S_CTRL.pure_loop(observation)
 
-            elif self.mode == "Turtlebot3_CTRL":
-                action = self.Turtlebot3_CTRL.pure_loop(observation)
-
             self.action_curr = action
 
             return action    
@@ -573,10 +588,10 @@ class N_CTRL:       ####### for wheeled mobile robot
         
         
         theta=observation[2]
-        k_rho = 1.5
+        k_rho = 15
         k_betha = -1.5
         k_alpha = 3
-        x_goal = 0 
+        x_goal = -1
         y_goal = 0 
         e_x = x_goal - observation[0]
         e_y = y_goal - observation[1]
@@ -654,61 +669,7 @@ class S_CTRL:       ########## for stanley control
 
         return [v,w]
 
-class Turtlebot3_CTRL:
-
-        #####################################################################################################
-        ########################## write down here nominal controller class #################################
-        #####################################################################################################
-    def __init__(self):
-        self.linear_speed = 2.5
-        self.angular_speed = 3
-
-        
-        # python simulation
-        self.k_rho = 3
-        self.k_alpha = 7
-        self.k_beta = -1.5
-        pass
     
-    def update_kappa(self, k_rho, k_alpha, k_beta):
-        # Parameters for gazebo
-        self.k_rho = k_rho
-        self.k_alpha = k_alpha
-        self.k_beta = k_beta
-
-    def pure_loop(self, observation, goal=[0, 0, 0]):
-        x_robot = observation[0]
-        y_robot = observation[1]
-        theta = observation[2]
-        x_goal = goal[0]
-        y_goal = goal[1]
-        theta_goal = goal[2]
-
-        error_x = x_goal - x_robot
-        error_y = y_goal - y_robot
-        error_theta = theta_goal - theta
-
-        rho = np.sqrt(error_x**2 + error_y**2)
-        alpha = -theta + np.arctan2(error_y, error_x)
-        beta = error_theta - alpha
-
-        w = self.k_alpha*alpha + self.k_beta*beta
-        v = self.k_rho*rho
-
-        while alpha > np.pi:
-            alpha -= 2* np.pi
-
-        while alpha < -np.pi:
-            alpha += 2* np.pi
-
-        if -np.pi < alpha <= -np.pi / 2 or np.pi / 2 < alpha <= np.pi:
-            v = -v
-
-        # print("[Controllers] observation: {} - goal: {}".format(observation, goal))
-        # print("[Controllers] v: {} - w: {}".format(v, w))
-        # print("[Controllers] rho: {} - alpha: {} - beta: {}".format(rho, alpha, beta))
-        
-        return [v,w]  
 
 
 
